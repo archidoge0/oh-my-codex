@@ -1,0 +1,84 @@
+name: GHAV OMX 2158 Ralph needs core
+
+on:
+  push:
+    branches:
+      - 'codex/ghav-omx2158-*'
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run check:no-unused
+
+  build-dist:
+    name: Build dist artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Digest built dist
+        run: find dist -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print "GHAV_DIST_SHA256=" $1}'
+      - name: Upload prebuilt dist artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-dist-node20
+          path: dist/
+          if-no-files-found: error
+
+  ralph-persistence-gate:
+    name: Ralph Persistence Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [typecheck, build-dist]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Download prebuilt dist artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ci-dist-node20
+          path: dist
+      - name: Digest downloaded dist
+        run: find dist -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print "GHAV_DIST_SHA256=" $1}'
+      - name: Run Ralph persistence verification matrix
+        run: npm run test:ralph-persistence:compiled
+
+  ci-status:
+    name: CI Status
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [typecheck, build-dist, ralph-persistence-gate]
+    steps:
+      - name: Check required job results
+        run: |
+          if [[ "${{ needs.typecheck.result }}" != "success" ]] ||
+             [[ "${{ needs.build-dist.result }}" != "success" ]] ||
+             [[ "${{ needs.ralph-persistence-gate.result }}" != "success" ]]; then
+            echo "::error::One or more required CI jobs failed"
+            exit 1
+          fi
+          echo "All selected CI checks passed"
