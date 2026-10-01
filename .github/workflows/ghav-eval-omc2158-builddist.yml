@@ -1,0 +1,60 @@
+name: GHAV OMC 2158 complete build-dist node_modules cache
+on:
+  push:
+    branches:
+      - codex/ghav-omc2158-builddist-before
+      - codex/ghav-omc2158-builddist-human
+      - codex/ghav-omc2158-builddist-ours
+permissions:
+  contents: read
+  actions: write
+jobs:
+  build-dist:
+    name: Build dist artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout fixed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ac191754a8293c83e7d6ff67b721fd2aab5dee8d
+      - name: Setup historical Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+          cache: npm
+      - name: Check postinstall precondition
+        shell: bash
+        run: |
+          test ! -e dist/scripts/postinstall.js
+          echo GHAV_POSTINSTALL_DIST_BEFORE=absent
+      - name: Install dependencies
+        run: npm ci
+      - name: Record pre-build state
+        shell: bash
+        run: |
+          test ! -e dist/scripts/postinstall.js
+          echo GHAV_POSTINSTALL_DIST_PREBUILD=absent
+      - name: Build
+        run: npm run build
+      - name: Record complete-task witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo GHAV_SOURCE_SHA=$(git rev-parse HEAD)
+          echo GHAV_LOCK_SHA=$(sha256sum package-lock.json | cut -d' ' -f1)
+          echo GHAV_NODE_VERSION=$(node --version)
+          echo GHAV_NPM_VERSION=$(npm --version)
+          test -x dist/cli/omx.js
+          test -e dist/scripts/postinstall.js
+          echo GHAV_DIST_CLI_EXECUTABLE=true
+          echo GHAV_DIST_SCRIPT_AFTER=present
+          (cd dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > dist-manifest.txt
+          echo GHAV_DIST_MANIFEST_SHA=$(sha256sum dist-manifest.txt | cut -d' ' -f1)
+          echo GHAV_DIST_FILES=$(wc -l < dist-manifest.txt | tr -d ' ')
+      - name: Upload prebuilt dist artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-dist-node20
+          path: dist/
+          if-no-files-found: error
