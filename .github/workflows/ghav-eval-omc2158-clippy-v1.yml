@@ -1,0 +1,38 @@
+name: GHAV oh-my-codex 2158 full Rust Clippy
+on:
+  push:
+    branches: ['codex/ghav-omc2158-clippy-v1-*']
+permissions:
+  contents: read
+jobs:
+  clippy:
+    name: Full Rust Clippy job
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout fixed historical source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ac191754a8293c83e7d6ff67b721fd2aab5dee8d
+          persist-credentials: false
+      - name: Setup Rust with Clippy
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.98.1
+          components: clippy
+      - name: Record fixed task context
+        run: |
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_CARGO_LOCK_SHA=$(sha256sum Cargo.lock | cut -d ' ' -f1)"
+          echo "GHAV_RUSTC_VERSION=$(rustc --version | tr ' ' '_')"
+          echo "GHAV_CARGO_VERSION=$(cargo --version | tr ' ' '_')"
+          echo "GHAV_CLIPPY_VERSION=$(cargo clippy --version | tr ' ' '_')"
+          echo "GHAV_RUST_CACHE_HIT=not-configured"
+          echo "GHAV_STATUS_LINES_BEFORE=$(git status --porcelain | wc -l | tr -d ' ')"
+      - name: Run complete historical Clippy command
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Record complete job witness
+        run: |
+          echo "GHAV_STATUS_LINES_AFTER=$(git status --porcelain | wc -l | tr -d ' ')"
+          echo "GHAV_CARGO_LOCK_SHA_AFTER=$(sha256sum Cargo.lock | cut -d ' ' -f1)"
+          echo "GHAV_TARGET_EXISTS=$([ -d target ] && echo true || echo false)"
