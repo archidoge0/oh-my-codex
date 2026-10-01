@@ -1,0 +1,50 @@
+name: GHAV oh-my-codex 2158 full typecheck
+on:
+  push:
+    branches: ['codex/ghav-omc2158-typecheck-v1-*']
+permissions:
+  contents: read
+jobs:
+  typecheck:
+    name: Full Typecheck job
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout fixed historical source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ac191754a8293c83e7d6ff67b721fd2aab5dee8d
+          persist-credentials: false
+      - name: Set up historical Node with npm cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Restore node_modules cache
+        id: node-modules-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: node_modules
+          key: ghav-omc2158-typecheck-v1-${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+      - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: Record fixed task context
+        run: |
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_PACKAGE_LOCK_SHA=$(sha256sum package-lock.json | cut -d ' ' -f1)"
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          echo "GHAV_NPM_VERSION=$(npm --version)"
+          echo "GHAV_TSC_VERSION=$(node -p 'require("./node_modules/typescript/package.json").version')"
+          echo "GHAV_NODE_MODULES_LOCK_SHA=$(sha256sum node_modules/.package-lock.json | cut -d ' ' -f1)"
+          echo "GHAV_NODE_MODULES_CACHE_HIT=${{ steps.node-modules-cache.outputs.cache-hit }}"
+          echo "GHAV_DIST_EXISTS=$([ -d dist ] && echo true || echo false)"
+      - name: Typecheck with no emission
+        run: npx tsc --noEmit
+      - name: Check no unused TypeScript
+        run: npm run check:no-unused
+      - name: Record complete job witness
+        run: |
+          echo "GHAV_STATUS_LINES=$(git status --porcelain | wc -l | tr -d ' ')"
+          echo "GHAV_DIST_EXISTS_AFTER=$([ -d dist ] && echo true || echo false)"
+          echo "GHAV_NODE_MODULES_LOCK_SHA_AFTER=$(sha256sum node_modules/.package-lock.json | cut -d ' ' -f1)"
