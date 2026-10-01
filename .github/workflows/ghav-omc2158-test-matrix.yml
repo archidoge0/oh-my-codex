@@ -1,0 +1,166 @@
+name: GHAV OMC 2158 complete four-lane test matrix
+on:
+  push:
+    branches:
+      - codex/ghav-omc2158-test-matrix-before
+      - codex/ghav-omc2158-test-matrix-human
+      - codex/ghav-omc2158-test-matrix-ours
+permissions:
+  contents: read
+  actions: write
+jobs:
+  build-dist:
+    name: Build dist artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout fixed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ac191754a8293c83e7d6ff67b721fd2aab5dee8d
+          persist-credentials: false
+      - name: Setup historical Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20.20.2
+          cache: npm
+      - name: Check postinstall precondition
+        shell: bash
+        run: |
+          test ! -e dist/scripts/postinstall.js
+          echo GHAV_POSTINSTALL_DIST_BEFORE=absent
+      - name: Install dependencies
+        run: npm ci
+      - name: Record pre-build state
+        shell: bash
+        run: |
+          test ! -e dist/scripts/postinstall.js
+          echo GHAV_POSTINSTALL_DIST_PREBUILD=absent
+      - name: Build
+        run: npm run build
+      - name: Record complete-task witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo GHAV_SOURCE_SHA=$(git rev-parse HEAD)
+          echo GHAV_LOCK_SHA=$(sha256sum package-lock.json | cut -d' ' -f1)
+          echo GHAV_NODE_VERSION=$(node --version)
+          echo GHAV_NPM_VERSION=$(npm --version)
+          test -x dist/cli/omx.js
+          test -e dist/scripts/postinstall.js
+          echo GHAV_DIST_CLI_EXECUTABLE=true
+          echo GHAV_DIST_SCRIPT_AFTER=present
+          (cd dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > dist-manifest.txt
+          echo GHAV_DIST_MANIFEST_SHA=$(sha256sum dist-manifest.txt | cut -d' ' -f1)
+          echo GHAV_DIST_FILES=$(wc -l < dist-manifest.txt | tr -d ' ')
+      - name: Upload prebuilt dist artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-dist-node20
+          path: dist/
+          if-no-files-found: error
+  test:
+    name: Test (Node ${{ matrix.node-version }} / ${{ matrix.lane }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: [build-dist]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node-version: 20.20.2
+            lane: team-state-runtime
+            test-roots: >-
+              dist/team/__tests__
+              dist/state/__tests__
+              dist/ralph/__tests__
+              dist/ralplan/__tests__
+              dist/runtime/__tests__
+            catalog-check: false
+          - node-version: 20.20.2
+            lane: hooks-notify-platform
+            test-roots: >-
+              dist/hooks/__tests__
+              dist/hooks/code-simplifier/__tests__
+              dist/hooks/extensibility/__tests__
+              dist/notifications/__tests__
+              dist/mcp/__tests__
+              dist/hud/__tests__
+              dist/verification/__tests__
+              dist/openclaw/__tests__
+            catalog-check: false
+          - node-version: 20.20.2
+            lane: cli-core-rest
+            test-roots: >-
+              dist/cli/__tests__
+              dist/agents/__tests__
+              dist/autoresearch/__tests__
+              dist/catalog/__tests__
+              dist/compat/__tests__
+              dist/config/__tests__
+              dist/modes/__tests__
+              dist/pipeline/__tests__
+              dist/planning/__tests__
+              dist/scripts/__tests__
+              dist/session-history/__tests__
+              dist/subagents/__tests__
+              dist/utils/__tests__
+              dist/visual/__tests__
+            catalog-check: true
+          - node-version: 22.23.3
+            lane: smoke
+            catalog-check: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ac191754a8293c83e7d6ff67b721fd2aab5dee8d
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Download prebuilt dist artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ci-dist-node20
+          path: dist
+      - name: Run grouped full-suite lane
+        if: matrix.lane != 'smoke'
+        run: |
+          node dist/scripts/run-test-files.js ${{ matrix.test-roots }}
+      - name: Verify generated catalog docs
+        if: matrix.catalog-check == true
+        run: node dist/scripts/generate-catalog-docs.js --check
+      - name: Run cross-rebase smoke command
+        if: matrix.lane == 'smoke'
+        run: npm run test:team:cross-rebase-smoke:compiled
+      - name: Run remaining smoke suite
+        if: matrix.lane == 'smoke'
+        run: |
+          node --test \
+            dist/cli/__tests__/packaged-script-resolution.test.js \
+            dist/cli/__tests__/package-bin-contract.test.js \
+            dist/cli/__tests__/explore.test.js \
+            dist/cli/__tests__/sparkshell-cli.test.js \
+            dist/hooks/__tests__/explore-routing.test.js \
+            dist/hooks/__tests__/explore-sparkshell-guidance-contract.test.js \
+            dist/scripts/__tests__/smoke-packed-install.test.js \
+            dist/verification/__tests__/explore-harness-release-workflow.test.js \
+            dist/compat/__tests__/*.test.js
+      - name: Record complete test-lane witness
+        if: always()
+        shell: bash
+        run: |
+          echo GHAV_SOURCE_SHA=$(git rev-parse HEAD)
+          echo GHAV_LOCK_SHA=$(sha256sum package-lock.json | cut -d' ' -f1)
+          echo GHAV_NODE_VERSION=$(node --version)
+          echo GHAV_NPM_VERSION=$(npm --version)
+          echo GHAV_LANE=${{ matrix.lane }}
+          echo GHAV_NM_CACHE_HIT=not-configured
+          (cd dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > dist-manifest.txt
+          echo GHAV_DIST_MANIFEST_SHA=$(sha256sum dist-manifest.txt | cut -d' ' -f1)
+          echo GHAV_DIST_FILES=$(wc -l < dist-manifest.txt | tr -d ' ')
+          git status --porcelain > task-status.txt
+          echo GHAV_STATUS_SHA=$(sha256sum task-status.txt | cut -d' ' -f1)
+          echo GHAV_STATUS_LINES=$(wc -l < task-status.txt | tr -d ' ')
