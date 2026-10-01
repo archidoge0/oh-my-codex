@@ -1,0 +1,68 @@
+name: GHAV OMC 2158 complete lint node_modules cache
+on:
+  push:
+    branches:
+      - codex/ghav-omc2158-lint-before
+      - codex/ghav-omc2158-lint-human
+      - codex/ghav-omc2158-lint-ours
+permissions:
+  contents: read
+  actions: write
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout fixed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ac191754a8293c83e7d6ff67b721fd2aab5dee8d
+      - name: Setup historical Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+          cache: npm
+      - name: Check postinstall precondition
+        shell: bash
+        run: |
+          test ! -e dist/scripts/postinstall.js
+          echo GHAV_POSTINSTALL_DIST_BEFORE=absent
+      - name: Restore node_modules cache
+        id: node-modules-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-ghav2158lint-node-modules-${{ hashFiles('package-lock.json') }}
+      - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: Lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint 2>&1 | tee lint-output.txt
+      - name: Record complete-task witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo GHAV_SOURCE_SHA=$(git rev-parse HEAD)
+          echo GHAV_LOCK_SHA=$(sha256sum package-lock.json | cut -d' ' -f1)
+          echo GHAV_NODE_VERSION=$(node --version)
+          echo GHAV_NPM_VERSION=$(npm --version)
+          if test -e dist/scripts/postinstall.js; then
+            echo GHAV_POSTINSTALL_DIST_AFTER=present
+          else
+            echo GHAV_POSTINSTALL_DIST_AFTER=absent
+          fi
+          npm ls --depth=0 --json > dependency-state.json
+          echo GHAV_DEPENDENCY_SHA=$(sha256sum dependency-state.json | cut -d' ' -f1)
+          echo GHAV_LINT_SHA=$(sha256sum lint-output.txt | cut -d' ' -f1)
+      - name: Upload complete-task witnesses
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: lint-task-witness
+          path: |
+            lint-output.txt
+            dependency-state.json
+          if-no-files-found: error
